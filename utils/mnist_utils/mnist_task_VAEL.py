@@ -16,11 +16,16 @@ from torch import nn, optim
 
 from models.vael import MNISTPairsVAELModel
 from models.vael_networks import MNISTPairsEncoder, MNISTPairsDecoder, MNISTPairsMLP
+
+# EM
+from models.vael import MNISTPairsDeepProblogModel
+from models.vael_networks import DetMNISTPairsEncoder
+
 from utils.mnist_utils.mnist_addition_dataset import nMNIST, check_dataset
 from utils.mnist_utils.metrics import reconstructive_ability, discriminative_ability, generative_ability
 from utils.mnist_utils.plot_utils import conditional_image_generation, learning_curve, image_reconstruction, image_generation
 from utils.mnist_utils.problog_model import create_facts, define_ProbLog_model
-from utils.mnist_utils.train import train_PLVAE
+from utils.mnist_utils.train import train_PLVAE, train_PLEnc
 
 
 # TODO: Documentation
@@ -398,6 +403,166 @@ def run_mnist_vael(param_grid, exp_class, exp_folder, data_folder, batch_size, d
             image_reconstruction(model, str(run_ID), folder=folder, img_suff="", img_dim=[28, 56], test_set=test_set)
             test_set.reset_counter()
             conditional_image_generation(model, str(run_ID), folder=folder)
+
+            # Draw training and validation curves
+            print('\nDrawing Learning Curves...')
+            learning_curve(os.path.join(folder, str(run_ID)),
+                           name=['train_info.npy', 'validation_info.npy'],
+                           folder_path=os.path.join(folder, str(run_ID), 'learning_curve'), save=True, overwrite=True)
+
+            counter -= 1
+            tot_number_exp += 1
+            elapsed = time() - start_exp
+            print('Done.')
+
+    print("{} experiment(s) completed (total time:{})".format(tot_number_exp, elapsed))
+
+
+
+
+def run_mnist_encoder(param_grid, exp_class, exp_folder, data_folder, batch_size, 
+                     dataset_dimensions, task='base', tag='base', device='cpu',
+                     time_limit=500, early_stopping_info=None, time_delta=350, n_digits = 10):
+    # Set device
+    device = torch.device(device if torch.cuda.is_available() else 'cpu')
+    print("\nDevice:", device)
+    # Load data
+    sequence_len = 2  # Number of digits in the sequence
+    label_dim = n_digits * sequence_len
+
+    # Load data
+    data_file =  f'2mnist_{n_digits}digits.pt'
+    data_folder = os.path.join(data_folder, f'2mnist_{n_digits}digits')
+    # Check whether dataset exists, if not build it
+    check_dataset(n_digits, data_folder, data_file, dataset_dimensions)
+    train_set, val_set, test_set = load_data(n_digits=n_digits, sequence_len=sequence_len, batch_size=batch_size,
+                                             data_file=data_file, data_folder=data_folder, task=task, tag=tag,
+                                             classes=None)
+
+    # MNIST classifier
+    clf = load_mnist_classifier(checkpoint_path='./utils/mnist_utils/MNIST_classifier.pt', device=device)
+    clf.eval()
+
+    # Define pre-compiled ProbLog programs and worlds-queries matrix
+    model_dict = build_model_dict(sequence_len, n_digits)
+    w_q = build_worlds_queries_matrix(sequence_len, n_digits)
+    w_q = w_q.to(device)
+
+    # Start experiments
+    start_exp = time()
+    elapsed = 0
+    tot_number_exp = 0
+    param_list = list(ParameterGrid(param_grid))
+
+    while elapsed + time_delta < time_limit:
+
+        Path(os.path.join(exp_folder, exp_class)).mkdir(parents=True, exist_ok=True)
+        exp_counter = 0
+        # Sample one possible parameters config and remove it from the experiments list
+        try:
+            config = random.sample(param_list, k=1)[0]
+        except:
+            print("\n\nNo more experiments to run.")
+            break
+        param_list.remove(config)
+
+        counter = 1
+        while counter and elapsed + time_delta < time_limit:
+
+            # Check if the required number of test for the current configuration has been already satisfied
+            run_ID, exp_ID, exp_counter, counter, params_columns = define_experiment(exp_folder, exp_class, config,
+                                                                                     exp_counter)
+            if not counter:
+                break
+
+            # Build VAEL model
+            encoder = DetMNISTPairsEncoder(hidden_channels=64, latent_dim=config['latent_dim_sym'],
+                                        dropout=config['dropout_ENC'])
+            
+            mlp = MNISTPairsMLP(in_features=config['latent_dim_sym'], n_facts=n_digits * 2)
+            model = MNISTPairsDeepProblogModel(encoder=encoder, mlp=mlp,
+                                        latent_dims=(config['latent_dim_sym']),
+                                        model_dict=model_dict, w_q=w_q, dropout=config['dropout'], is_train=True,
+                                        device=device)
+            model = model.to(device)
+
+            optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
+
+            # Reset data generator
+            train_set.reset_counter()
+            val_set.reset_counter()
+
+            # Timing
+            start = time()
+
+            # Train
+            checkpoint_path, epoch, train_info, validation_info = train_PLEnc(model,
+                                                                              optimizer,
+                                                                              n_epochs=config['max_epoch'],
+                                                                              train_set=train_set,
+                                                                              val_set=val_set,
+                                                                              early_stopping_info=early_stopping_info,
+                                                                              run_ID=str(run_ID),
+                                                                              recon_w=config['recon_w'],
+                                                                              kl_w=config['kl_w'],
+                                                                              #query_w=config['query_w'],
+                                                                              sup_w=config['sup_w'],
+                                                                              folder=os.path.join(exp_folder, exp_class,
+                                                                                                  exp_ID),
+                                                                              rec_loss=config['rec_loss'],
+                                                                              train_batch_size=batch_size['train'],
+                                                                              val_batch_size=batch_size['val'])
+
+            # Timing
+            end = time()
+            tot_time = end - start
+
+            # Save training and validation info
+            np.save(os.path.join(exp_folder, exp_class, exp_ID, str(run_ID), 'train_info.npy'), train_info)
+            np.save(os.path.join(exp_folder, exp_class, exp_ID, str(run_ID), 'validation_info.npy'), validation_info)
+
+            # Load checkpoint
+            last_checkpoint = torch.load(checkpoint_path)
+            model.load_state_dict(last_checkpoint['model'])
+            optimizer.load_state_dict(last_checkpoint['optimizer'])
+
+            # Reset generator
+            train_set.reset_counter()
+            val_set.reset_counter()
+
+            # Evaluation
+            model.eval()
+            with torch.no_grad():
+                print("\n\n****TEST MODEL WITH CONFIGURATION*****\n", config)
+
+                print("\n   Evaluating predictive ability on test set...")
+                test_set.reset_counter()
+                predictive_acc_test_set = discriminative_ability(model, test_set)
+                print("   Evaluating predictive ability on validation set...")
+                val_set.reset_counter()
+                predictive_acc_val_set = discriminative_ability(model, val_set)
+                print("Number Of Images Tested =", test_set.samples_x_world * len(test_set))
+                print("Discriminative Accuracy =", predictive_acc_test_set)
+
+            # Update log file
+            update_info = '{},{},'.format(exp_ID, run_ID) + ''.join(
+                str(config[key]) + ',' for key in params_columns) + "{},{},{},{},{},{},{},{},{}\n".format(
+                float(0),
+                predictive_acc_val_set,
+                float(0),
+                predictive_acc_test_set,
+                0,
+                epoch,
+                config['max_epoch'],
+                tot_time,
+                str(tag))
+            lock_filename = os.path.join(exp_folder, exp_class, 'access.lock')
+            update_resource(log_filepath=os.path.join(exp_folder, exp_class, exp_class + '.csv'),
+                            update_info=update_info, lock_filename=lock_filename)
+
+            # Generate reconstruction and generation samples
+            folder = os.path.join(exp_folder, exp_class, exp_ID)
+            
 
             # Draw training and validation curves
             print('\nDrawing Learning Curves...')

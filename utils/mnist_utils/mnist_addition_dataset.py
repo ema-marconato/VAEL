@@ -178,12 +178,14 @@ def check_dataset(n_digits, data_folder, data_file, dataset_dim):
         train_imgs, train_labels, train_indexes = create_dataset(n_digit=n_digits, sequence_len=2,
                                                                  samples_x_world=samples_x_world['train'], train=True,
                                                                  download=True)
+
         val_imgs, val_labels, val_indexes = create_dataset(n_digit=n_digits, sequence_len=2,
                                                            samples_x_world=samples_x_world['val'], train=True,
                                                            download=True)
         test_imgs, test_labels, test_indexes = create_dataset(n_digit=n_digits, sequence_len=2,
                                                               samples_x_world=samples_x_world['test'], train=False,
                                                               download=True)
+
 
         print(
             f"Dataset dimensions: \n\t{dataset_dim['train']} train ({samples_x_world['train']} samples per world), \n\t{dataset_dim['val']} validation ({samples_x_world['val']} samples per world), \n\t{dataset_dim['test']} test ({samples_x_world['test']} samples per world)")

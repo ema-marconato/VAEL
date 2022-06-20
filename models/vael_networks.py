@@ -141,6 +141,70 @@ class MNISTPairsDecoder(nn.Module):
         return x
 
 
+
+
+class DetMNISTPairsEncoder(nn.Module):
+
+    def __init__(self, img_channels=1, hidden_channels=32, latent_dim=8, dropout=0.5):
+        super(DetMNISTPairsEncoder, self).__init__()
+
+        self.img_channels = img_channels
+        self.hidden_channels = hidden_channels
+        self.latent_dim = latent_dim
+        self.label_dim = 20
+        self.unflatten_dim = (3, 7)
+
+        self.enc_block_1 = nn.Conv2d(
+            in_channels=self.img_channels,
+            out_channels=self.hidden_channels,
+            kernel_size=4,
+            stride=2,
+            padding=1)  # hidden_channels x 14 x 28
+
+        self.enc_block_2 = nn.Conv2d(
+            in_channels=self.hidden_channels,
+            out_channels=self.hidden_channels * 2,
+            kernel_size=4,
+            stride=2,
+            padding=1)  # 2*hidden_channels x 7 x 14
+
+        self.enc_block_3 = nn.Conv2d(
+            in_channels=self.hidden_channels * 2,
+            out_channels=self.hidden_channels * 4,
+            kernel_size=4,
+            stride=2,
+            padding=1)  # 4*hidden_channels x 2 x 7
+
+        self.flatten = Flatten()
+
+        self.dense_mu = nn.Linear(
+            in_features=4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1],
+            out_features=self.latent_dim)
+
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x):
+        # MNISTPairsEncoder block 1
+        x = self.enc_block_1(x)
+        x = nn.ReLU()(x)
+        x = self.dropout(x)
+
+        # MNISTPairsEncoder block 2
+        x = self.enc_block_2(x)
+        x = nn.ReLU()(x)
+        x = self.dropout(x)
+
+        # MNISTPairsEncoder block 3
+        x = self.enc_block_3(x)
+        x = nn.ReLU()(x)
+
+        # mu and logvar
+        x = self.flatten(x)  # batch_size, dim1, dim2, dim3 -> batch_size, dim1*dim2*dim3
+        mu= self.dense_mu(x)
+
+        return mu
+
+
 class MNISTPairsMLP(nn.Module):
     def __init__(self, in_features=20, n_facts=10, hidden_channels=20):
         super(MNISTPairsMLP, self).__init__()
