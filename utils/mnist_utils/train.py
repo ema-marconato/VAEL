@@ -60,7 +60,7 @@ def det_loss_function(x, mu, add_prob, model, labels=None, query=True, recon_w=1
     else:
         query_cross_entropy = torch.zeros(size=())
 
-    # Cross Entropy digits supervision
+    # Cross Entropy digits supervisionhi
     if False:
         idxs = labels[labels[:, -1] >= -1][:, -1]  # Index(es) of the labelled image in the current batch
         digit1, digit2 = labels[idxs[0]][:2]  # Correct digit in position 1 and 2, each batch has the same images
@@ -71,7 +71,7 @@ def det_loss_function(x, mu, add_prob, model, labels=None, query=True, recon_w=1
         target = torch.ones_like(pred, dtype=torch.float32)
         label_cross_entropy = torch.nn.BCELoss(reduction='mean')(torch.flatten(pred), torch.flatten(target))
     else: 
-        label_cross_entropy = np.zeros(size=())
+        label_cross_entropy = torch.zeros(size=())
   # VAVE Losses
     recon_loss = torch.tensor(0)
     gauss_kl_div = torch.tensor(0)
@@ -166,6 +166,13 @@ def train_PLVAE(model, optimizer, n_epochs, train_set, val_set, folder, early_st
                                                                                sup_w=sup_w,
                                                                                sup=sup,
                                                                                rec_loss=rec_loss)
+
+
+            print('Parameters')
+            print(data.permute(1,0,2,3).size(), labels.size())
+
+            print(model.encoder)
+            quit()
 
             # Registering losses
             train_epoch_info['elbo'].append(loss.data.cpu().detach().numpy())

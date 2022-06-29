@@ -29,7 +29,7 @@ if __name__ == "__main__":
                        tag=config_object['exp_config']['tag'][0], device=config_object['device'], time_limit=100800,
                        early_stopping_info=config_object['early_stopping_info'], time_delta=300)
 
-    elif args.task == 'mnist':
+    elif args.task == 'mnist' or args.task == 'MNIST':
         config_object = config.mnist_vael
         # Experiments and data folders
         exp_class = config_object['experiment_name']
